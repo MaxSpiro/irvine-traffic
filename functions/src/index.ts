@@ -59,6 +59,21 @@ export const tripDuration = onSchedule('*/5 * * * *', async () => {
 })
 
 export const analyzeData = onRequest(async (req, res) => {
+  const lastUpdate = await db.collection('analysis').doc('lastUpdate').get()
+  logger.log('Last update: ', lastUpdate.data()?.time)
+  if (
+    lastUpdate.exists &&
+    lastUpdate.data()?.time &&
+    (lastUpdate.data()?.time as Timestamp).seconds >
+      Timestamp.now().seconds - 60 * 60 * 24
+  ) {
+    logger.log('Using cached data')
+    const sd = await db.collection('analysis').doc('sd').get()
+    const ir = await db.collection('analysis').doc('ir').get()
+    res.json({ sd: sd.data(), ir: ir.data() })
+    return
+  }
+  logger.log('Updating data')
   const trips = await db.collection('trips').get()
   const sdDurations = new Map<string, number[]>()
   const irDurations = new Map<string, number[]>()
@@ -120,12 +135,15 @@ export const analyzeData = onRequest(async (req, res) => {
         median: `${hours}h ${minutes}m ${seconds}s`,
       }
     })
-
-  await db.collection('analysis').add({
-    sd,
-    ir,
-    time: Timestamp.now(),
-  })
+  logger.log('Updating cache')
+  await db
+    .collection('analysis')
+    .doc('lastUpdate')
+    .set({ time: Timestamp.now() })
+  logger.log('Inserting ' + sd.length + ' records into san diego')
+  await db.collection('analysis').doc('sd').set({ data: sd })
+  logger.log('Inserting ' + ir.length + ' records into irvine')
+  await db.collection('analysis').doc('ir').set({ data: ir })
 
   res.json({ ir, sd })
 })
