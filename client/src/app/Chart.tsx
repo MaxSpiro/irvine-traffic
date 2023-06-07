@@ -1,6 +1,6 @@
 "use client";
 import { LineChart, Line, XAxis, YAxis, Tooltip } from "recharts";
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { Chart } from "./types";
 
 export function Chart({ data }: { data: Chart }) {
@@ -26,6 +26,7 @@ export function Chart({ data }: { data: Chart }) {
             dataKey="median"
             data={chartData}
             stroke="#8884d8"
+            dot={false}
           />
           <XAxis
             dataKey="time"
@@ -50,9 +51,29 @@ export function Chart({ data }: { data: Chart }) {
             labelStyle={{
               color: "black",
             }}
+            formatter={(value) => {
+              value = value as number;
+              const hours = Math.floor(value / 3600);
+              const minutes = Math.floor((value % 3600) / 60);
+              return `${hours}h ${minutes}m`;
+            }}
+            labelFormatter={(time) => {
+              time = time as number;
+              const hours = Math.floor(time / 60);
+              const minutes = time % 60;
+              const ampm = hours >= 12 ? "PM" : "AM";
+              return `${
+                hours > 12 ? hours - 12 : hours === 0 ? 12 : hours
+              }:${padLeft(minutes, 2, "0")} ${ampm}`;
+            }}
           />
         </LineChart>
       )}
     </main>
   );
 }
+
+const padLeft = (str: string | number, length: number, char: string) => {
+  str = typeof str === "string" ? str : str.toString();
+  return char.repeat(length - str.length) + str;
+};
