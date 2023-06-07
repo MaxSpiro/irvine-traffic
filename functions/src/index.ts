@@ -58,6 +58,11 @@ export const tripDuration = onSchedule('*/5 * * * *', async () => {
   }
 })
 
+const padLeft = (str: string | number, length: number, char: string) => {
+  str = typeof str === 'string' ? str : str.toString()
+  return char.repeat(length - str.length) + str
+}
+
 export const analyzeData = onRequest(async (req, res) => {
   const lastUpdate = await db.collection('analysis').doc('lastUpdate').get()
   logger.log('Last update: ', lastUpdate.data()?.time)
@@ -79,11 +84,24 @@ export const analyzeData = onRequest(async (req, res) => {
   const irDurations = new Map<string, number[]>()
   trips.docs.map((doc) => {
     const data = doc.data() as Trip
-    const time = data.time.toDate().toISOString().split('T')[1]
+    const fullTime = data.time.toDate().toISOString().split('T')[1]
+    const [hours, minutes] = fullTime.split(':')
+    // Round to nearest 5 minutes
+    const timeKey = `${hours}:${padLeft(
+      Math.round(parseInt(minutes) / 5) * 5,
+      2,
+      '0',
+    )}`
     if (data.destination === 'San Diego') {
-      sdDurations.set(time, [...(sdDurations.get(time) || []), data.duration])
+      sdDurations.set(timeKey, [
+        ...(sdDurations.get(timeKey) || []),
+        data.duration,
+      ])
     } else {
-      irDurations.set(time, [...(irDurations.get(time) || []), data.duration])
+      irDurations.set(timeKey, [
+        ...(irDurations.get(timeKey) || []),
+        data.duration,
+      ])
     }
   })
   const sdMedians = new Map<string, number>()
