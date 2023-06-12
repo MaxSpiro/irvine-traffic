@@ -63,105 +63,78 @@ const padLeft = (str: string | number, length: number, char: string) => {
   return char.repeat(length - str.length) + str
 }
 
+const daysOfWeek = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const
+
 export const analyzeData = onRequest(async (req, res) => {
   const lastUpdate = await db.collection('analysis').doc('lastUpdate').get()
   logger.log('Last update: ', lastUpdate.data()?.time)
-  if (
-    lastUpdate.exists &&
-    lastUpdate.data()?.time &&
-    (lastUpdate.data()?.time as Timestamp).seconds >
-      Timestamp.now().seconds - 60 * 60 * 24
-  ) {
-    logger.log('Using cached data')
-    const sd = await db.collection('analysis').doc('sd').get()
-    const ir = await db.collection('analysis').doc('ir').get()
-    res.json({ sd: sd.data(), ir: ir.data() })
-    return
-  }
+  // if (
+  //   lastUpdate.exists &&
+  //   lastUpdate.data()?.time &&
+  //   (lastUpdate.data()?.time as Timestamp).seconds >
+  //     Timestamp.now().seconds - 60 * 60 * 24
+  // ) {
+  //   logger.log('Using cached data')
+  //   const sd = await db.collection('analysis').doc('sd').get()
+  //   const ir = await db.collection('analysis').doc('ir').get()
+  //   res.json({ sd: sd.data(), ir: ir.data() })
+  //   return
+  // }
   logger.log('Updating data')
   const trips = await db.collection('trips').get()
-  const sdDurations = new Map<string, number[]>()
-  const irDurations = new Map<string, number[]>()
+  const durations = new Map<string, number[]>()
   trips.docs.map((doc) => {
     const data = doc.data() as Trip
-    const fullTime = data.time.toDate().toISOString().split('T')[1]
-    const [hours, minutes] = fullTime.split(':')
-    // Round to nearest 5 minutes
-    const timeKey = `${hours}:${padLeft(
-      Math.round(parseInt(minutes) / 5) * 5,
+    const date = data.time.toDate()
+    const day = daysOfWeek[date.getDay()]
+    const [hour, minute] = date.toISOString().split('T')[1].split(':')
+    const roundedTimestamp = `${padLeft(hour, 2, '0')}:${padLeft(
+      Math.round(parseInt(minute) / 5) * 5,
       2,
       '0',
     )}`
-    if (data.destination === 'San Diego') {
-      sdDurations.set(timeKey, [
-        ...(sdDurations.get(timeKey) || []),
-        data.duration,
-      ])
+
+    const categories = ['All', day]
+    if (day === 'Sunday' || day === 'Saturday') {
+      categories.push('Weekends')
     } else {
-      irDurations.set(timeKey, [
-        ...(irDurations.get(timeKey) || []),
-        data.duration,
-      ])
+      categories.push('Weekdays')
+    }
+
+    const keys = categories.map(
+      (category) => `${category} ${data.destination} ${roundedTimestamp}`,
+    )
+    for (const key of keys) {
+      durations.set(key, [...(durations.get(key) || []), data.duration])
     }
   })
-  const sdMedians = new Map<string, number>()
-  const irMedians = new Map<string, number>()
-  sdDurations.forEach((durations, time) => {
+  const medians = new Map<string, number>()
+  durations.forEach((durations, key) => {
     const median = durations.sort((a, b) => a - b)[
       Math.floor(durations.length / 2)
     ]
-    sdMedians.set(time, median)
-  })
-  irDurations.forEach((durations, time) => {
-    const median = durations.sort((a, b) => a - b)[
-      Math.floor(durations.length / 2)
-    ]
-    irMedians.set(time, median)
+    medians.set(key, median)
   })
 
-  const sd = [...sdMedians.entries()]
-    .sort((a, b) => {
-      return a[1] - b[1]
-    })
-    .map(([time, median]) => {
-      const hours = Math.floor(median / 3600)
-      const minutes = Math.floor((median % 3600) / 60)
-      const seconds = median % 60
+  res.json(Object.fromEntries(medians))
 
-      const [hour, minute] = time.split(':')
-      const ampm = parseInt(hour) < 12 ? 'AM' : 'PM'
-      const hours12 = parseInt(hour) % 12 || 12
-      return {
-        time: `${hours12}:${minute} ${ampm}`,
-        median: `${hours}h ${minutes}m ${seconds}s`,
-      }
-    })
-  const ir = [...irMedians.entries()]
-    .sort((a, b) => {
-      return a[1] - b[1]
-    })
-    .map(([time, median]) => {
-      const hours = Math.floor(median / 3600)
-      const minutes = Math.floor((median % 3600) / 60)
-      const seconds = median % 60
+  // logger.log('Updating cache')
+  // await db
+  //   .collection('analysis')
+  //   .doc('lastUpdate')
+  //   .set({ time: Timestamp.now() })
+  // logger.log('Inserting ' + sd.length + ' records into san diego')
+  // await db.collection('analysis').doc('sd').set({ data: sd })
+  // logger.log('Inserting ' + ir.length + ' records into irvine')
+  // await db.collection('analysis').doc('ir').set({ data: ir })
 
-      const [hour, minute] = time.split(':')
-      const ampm = parseInt(hour) < 12 ? 'AM' : 'PM'
-      const hours12 = parseInt(hour) % 12 || 12
-      return {
-        time: `${hours12}:${minute} ${ampm}`,
-        median: `${hours}h ${minutes}m ${seconds}s`,
-      }
-    })
-  logger.log('Updating cache')
-  await db
-    .collection('analysis')
-    .doc('lastUpdate')
-    .set({ time: Timestamp.now() })
-  logger.log('Inserting ' + sd.length + ' records into san diego')
-  await db.collection('analysis').doc('sd').set({ data: sd })
-  logger.log('Inserting ' + ir.length + ' records into irvine')
-  await db.collection('analysis').doc('ir').set({ data: ir })
-
-  res.json({ ir, sd })
+  // res.json({ ir, sd })
 })
