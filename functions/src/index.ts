@@ -76,18 +76,33 @@ const daysOfWeek = [
 export const analyzeData = onRequest(async (req, res) => {
   const lastUpdate = await db.collection('analysis').doc('lastUpdate').get()
   logger.log('Last update: ', lastUpdate.data()?.time)
-  // if (
-  //   lastUpdate.exists &&
-  //   lastUpdate.data()?.time &&
-  //   (lastUpdate.data()?.time as Timestamp).seconds >
-  //     Timestamp.now().seconds - 60 * 60 * 24
-  // ) {
-  //   logger.log('Using cached data')
-  //   const sd = await db.collection('analysis').doc('sd').get()
-  //   const ir = await db.collection('analysis').doc('ir').get()
-  //   res.json({ sd: sd.data(), ir: ir.data() })
-  //   return
-  // }
+  if (
+    lastUpdate.exists &&
+    lastUpdate.data()?.time &&
+    (lastUpdate.data()?.time as Timestamp).seconds >
+      Timestamp.now().seconds - 60 * 60 * 24
+  ) {
+    logger.log('Using cached data')
+    const categories = [
+      ...daysOfWeek.map((day) => day.toLowerCase()),
+      'all',
+      'weekdays',
+      'weekends',
+    ]
+    const response: Record<string, FirebaseFirestore.DocumentData> = {}
+    await Promise.all(
+      categories.map(async (category) => {
+        const data = (
+          await db.collection('analysis').doc(category).get()
+        ).data()
+        if (data) {
+          response[category] = data
+        }
+      }),
+    )
+    res.json(response)
+    return
+  }
   logger.log('Updating data')
   const trips = await db.collection('trips').get()
   const durations = new Map<string, number[]>()
@@ -102,17 +117,15 @@ export const analyzeData = onRequest(async (req, res) => {
       '0',
     )}`
 
-    const categories = ['All', day]
-    if (day === 'Sunday' || day === 'Saturday') {
-      categories.push('Weekends')
-    } else {
-      categories.push('Weekdays')
-    }
-
-    const keys = categories.map(
-      (category) => `${category} ${data.destination} ${roundedTimestamp}`,
-    )
-    for (const key of keys) {
+    for (const category of [
+      'All',
+      day,
+      day === 'Sunday' || day === 'Saturday' ? 'Weekends' : 'Weekdays',
+    ]) {
+      const key = `${category} ${data.destination.replace(
+        /[^a-zA-Z0-9]/,
+        '',
+      )} ${roundedTimestamp}`
       durations.set(key, [...(durations.get(key) || []), data.duration])
     }
   })
@@ -124,13 +137,30 @@ export const analyzeData = onRequest(async (req, res) => {
     medians.set(key, median)
   })
 
-  res.json(Object.fromEntries(medians))
+  const categories = new Map<
+    string,
+    { irvine: Record<string, number>; sanDiego: Record<string, number> }
+  >()
+  medians.forEach((duration, key) => {
+    const [category, destination, timestamp] = key.split(' ')
+    const records = categories.get(category.toLowerCase()) ?? {
+      irvine: {},
+      sanDiego: {},
+    }
+    records[destination === 'Irvine' ? 'irvine' : 'sanDiego'][timestamp] =
+      duration
+    categories.set(category.toLowerCase(), records)
+  })
 
-  // logger.log('Updating cache')
-  // await db
-  //   .collection('analysis')
-  //   .doc('lastUpdate')
-  //   .set({ time: Timestamp.now() })
+  logger.log('Updating cache')
+  await Promise.all([
+    ...[...categories.entries()].map(async ([category, obj]) => {
+      await db.collection('analysis').doc(category).set(obj)
+    }),
+    db.collection('analysis').doc('lastUpdate').set({ time: Timestamp.now() }),
+  ])
+  res.json(Object.fromEntries(categories))
+
   // logger.log('Inserting ' + sd.length + ' records into san diego')
   // await db.collection('analysis').doc('sd').set({ data: sd })
   // logger.log('Inserting ' + ir.length + ' records into irvine')
