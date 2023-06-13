@@ -1,28 +1,29 @@
-import { Chart } from "./Chart";
-import type { Res, Trip } from "./types";
+import { Chart } from './Chart'
+import type { ServerResponse, Category, ChartData } from './types'
 
 export default async function Home() {
-  const data: Res = await fetch(
-    "https://analyzedata-cjhk5wpoiq-uc.a.run.app/"
-  ).then((res) => res.json());
+  const response: ServerResponse = await fetch(
+    'https://analyzedata-cjhk5wpoiq-uc.a.run.app/',
+  ).then((res) => res.json())
 
-  const map = (value: Trip) => {
-    const [h, m, s] = value.median.split(" ");
-    const [hours, minutes, seconds] = [h, m, s].map((v) =>
-      parseInt(v.replace(/\D/g, ""))
-    );
-    const median = hours * 3600 + minutes * 60 + seconds;
+  const chartData = Object.keys(response).reduce((chartData, category) => {
+    const value = response[category as Category]
+    chartData[category as Category] = {
+      sanDiego: Object.entries(value.sanDiego).map(([timestamp, median]) => {
+        const [hour, minute] = timestamp.split(':')
+        const time = parseInt(hour) * 60 + parseInt(minute)
 
-    const [time, ampm] = value.time.split(" ");
-    const [hour, minute] = time.split(":").map((v) => parseInt(v));
-    const timeInMinutes = hour * 60 + minute;
-    return {
-      median,
-      time: timeInMinutes + (ampm === "PM" ? 12 * 60 : 0),
-    };
-  };
-  const ir = data.ir.data.map(map).sort((a, b) => a.time - b.time);
-  const sd = data.sd.data.map(map).sort((a, b) => a.time - b.time);
-  console.log(ir);
-  return <Chart data={{ ir, sd }} />;
+        return { time, median }
+      }),
+      irvine: Object.entries(value.irvine).map(([timestamp, median]) => {
+        const [hour, minute] = timestamp.split(':')
+        const time = parseInt(hour) * 60 + parseInt(minute)
+
+        return { time, median }
+      }),
+    }
+    return chartData
+  }, {} as ChartData)
+
+  return <Chart {...chartData} />
 }
